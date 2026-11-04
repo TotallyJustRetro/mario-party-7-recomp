@@ -6,56 +6,72 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-linux:
-    runs-on: ubuntu-latest
+  build-windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libsdl2-dev python3 \
-            libgl-dev libgles2-mesa-dev
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Ninja
+        run: choco install ninja -y
 
       - name: Download dtk
+        shell: bash
         run: |
-          curl -sL -o tools/dtk \
-            https://github.com/encounter/decomp-toolkit/releases/latest/download/dtk-linux-x86_64
-          chmod +x tools/dtk
-        working-directory: gcn-recomp
+          curl -sL -o gcn-recomp/tools/dtk.exe \
+            https://github.com/encounter/decomp-toolkit/releases/latest/download/dtk-windows-x86_64.exe
 
       - name: Download game disc
+        shell: bash
         env:
           GAME_URL: ${{ secrets.GAME_ISO_URL }}
         run: |
           if [ -n "$GAME_URL" ]; then
             curl -L -o game.iso "$GAME_URL"
+            echo "HAVE_DISC=true" >> $GITHUB_ENV
           else
-            echo "No GAME_ISO_URL secret set - building runtime_check only"
+            echo "No GAME_ISO_URL secret - building runtime_check only"
+            echo "HAVE_DISC=false" >> $GITHUB_ENV
           fi
 
-      - name: Configure
+      - name: Configure (with disc)
+        if: env.HAVE_DISC == 'true'
+        shell: cmd
         run: |
-          if [ -f game.iso ]; then
-            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGAME_ISO=game.iso
-          else
-            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          fi
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGAME_ISO=game.iso
 
-      - name: Build
+      - name: Configure (runtime check only)
+        if: env.HAVE_DISC != 'true'
+        shell: cmd
         run: |
-          if [ -f game.iso ]; then
-            cmake --build build --target mp7 -j$(nproc)
-          else
-            cmake --build build --target runtime_check -j$(nproc)
-          fi
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (with disc)
+        if: env.HAVE_DISC == 'true'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cmake --build build --target mp7
+
+      - name: Build (runtime check only)
+        if: env.HAVE_DISC != 'true'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cmake --build build --target runtime_check
 
       - name: Upload binary
-        if: success()
+        if: env.HAVE_DISC == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: mp7-linux
-          path: build/mp7
+          name: mp7-windows
+          path: build/mp7.exe
           if-no-files-found: ignore
