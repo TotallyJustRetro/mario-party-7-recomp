@@ -1,0 +1,4 @@
+OSLoadContext
+OSReport
+OSPanic
+OSResetSystem
