@@ -34,7 +34,10 @@ jobs:
           GAME_URL: ${{ secrets.GAME_ISO_URL }}
         run: |
           if [ -n "$GAME_URL" ]; then
-            curl -L -o game.iso "$GAME_URL"
+            echo "Downloading disc..."
+            curl -L -o game_input.rvz "$GAME_URL"
+            echo "Converting RVZ to ISO..."
+            gcn-recomp/tools/dtk.exe disc convert game_input.rvz game.iso
             echo "HAVE_DISC=true" >> $GITHUB_ENV
           else
             echo "No GAME_ISO_URL secret - building runtime_check only"
@@ -42,24 +45,22 @@ jobs:
           fi
 
       - name: Configure
-        shell: cmd
+        shell: bash
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          if "%HAVE_DISC%"=="true" (
+          if [ "$HAVE_DISC" == "true" ]; then
             cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGAME_ISO=game.iso
-          ) else (
+          else
             cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          )
+          fi
 
       - name: Build
-        shell: cmd
+        shell: bash
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          if "%HAVE_DISC%"=="true" (
-            cmake --build build --target mp7
-          ) else (
-            cmake --build build --target runtime_check
-          )
+          if [ "$HAVE_DISC" == "true" ]; then
+            cmake --build build --target mp7 -j4
+          else
+            cmake --build build --target runtime_check -j4
+          fi
 
       - name: Upload binary
         if: env.HAVE_DISC == 'true'
