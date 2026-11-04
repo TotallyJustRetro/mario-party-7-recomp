@@ -1,0 +1,128 @@
+bash
+
+cat << 'EOF'
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libsdl2-dev python3 \
+            libgl-dev libgles2-mesa-dev
+
+      - name: Download dtk
+        run: |
+          curl -sL -o tools/dtk \
+            https://github.com/encounter/decomp-toolkit/releases/latest/download/dtk-linux-x86_64
+          chmod +x tools/dtk
+        working-directory: gcn-recomp
+
+      - name: Download game disc
+        env:
+          GAME_URL: ${{ secrets.GAME_ISO_URL }}
+        run: |
+          if [ -n "$GAME_URL" ]; then
+            curl -L -o game.iso "$GAME_URL"
+          else
+            echo "No GAME_ISO_URL secret set — building runtime_check only"
+          fi
+
+      - name: Configure
+        run: |
+          if [ -f game.iso ]; then
+            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGAME_ISO=game.iso
+          else
+            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          fi
+
+      - name: Build
+        run: |
+          if [ -f game.iso ]; then
+            cmake --build build --target mp7 -j$(nproc)
+          else
+            cmake --build build --target runtime_check -j$(nproc)
+          fi
+
+      - name: Upload binary
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp7-linux
+          path: build/mp7
+          if-no-files-found: ignore
+EOF
+Output
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libsdl2-dev python3 \
+            libgl-dev libgles2-mesa-dev
+
+      - name: Download dtk
+        run: |
+          curl -sL -o tools/dtk \
+            https://github.com/encounter/decomp-toolkit/releases/latest/download/dtk-linux-x86_64
+          chmod +x tools/dtk
+        working-directory: gcn-recomp
+
+      - name: Download game disc
+        env:
+          GAME_URL: ${{ secrets.GAME_ISO_URL }}
+        run: |
+          if [ -n "$GAME_URL" ]; then
+            curl -L -o game.iso "$GAME_URL"
+          else
+            echo "No GAME_ISO_URL secret set — building runtime_check only"
+          fi
+
+      - name: Configure
+        run: |
+          if [ -f game.iso ]; then
+            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGAME_ISO=game.iso
+          else
+            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          fi
+
+      - name: Build
+        run: |
+          if [ -f game.iso ]; then
+            cmake --build build --target mp7 -j$(nproc)
+          else
+            cmake --build build --target runtime_check -j$(nproc)
+          fi
+
+      - name: Upload binary
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp7-linux
+          path: build/mp7
+          if-no-files-found: ignore
