@@ -67,23 +67,46 @@ jobs:
 
       - name: Collect runtime DLLs
         if: env.HAVE_DISC == 'true'
-        shell: bash
+        shell: powershell
         run: |
-          mkdir -p dist
-          cp build/mp7.exe dist/
-          # Copy MinGW runtime DLLs needed to run on machines without MinGW
-          for dll in libwinpthread-1.dll libgcc_s_seh-1.dll libstdc++-6.dll; do
-            path=$(where $dll 2>/dev/null || find /c/mingw64 /c/mingw /c/msys64 -name "$dll" 2>/dev/null | head -1)
-            if [ -f "$path" ]; then
-              cp "$path" dist/
-              echo "Copied $dll"
-            else
-              echo "WARNING: $dll not found"
-            fi
-          done
-          # Copy SDL2 if present
-          find build -name "SDL2.dll" -exec cp {} dist/ \; 2>/dev/null || true
-          ls -la dist/
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item build\mp7.exe dist\
+
+          # Find MinGW DLLs - check all common locations on the GitHub runner
+          $dllNames = @("libwinpthread-1.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll")
+          $searchPaths = @(
+            "C:\mingw64\bin",
+            "C:\mingw\bin",
+            "C:\msys64\mingw64\bin",
+            "C:\msys64\usr\bin",
+            "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin"
+          )
+
+          foreach ($dll in $dllNames) {
+            $found = $false
+            foreach ($path in $searchPaths) {
+              $full = Join-Path $path $dll
+              if (Test-Path $full) {
+                Copy-Item $full dist\
+                Write-Host "Copied $dll from $path"
+                $found = $true
+                break
+              }
+            }
+            if (-not $found) {
+              Write-Host "WARNING: $dll not found in any search path"
+            }
+          }
+
+          # Find SDL2.dll in build tree
+          $sdl = Get-ChildItem -Path build -Filter SDL2.dll -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($sdl) {
+            Copy-Item $sdl.FullName dist\
+            Write-Host "Copied SDL2.dll"
+          }
+
+          Write-Host "--- dist contents ---"
+          Get-ChildItem dist
 
       - name: Upload binary
         if: env.HAVE_DISC == 'true'
