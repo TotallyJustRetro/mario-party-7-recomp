@@ -65,10 +65,30 @@ jobs:
             cmake --build build --target runtime_check -j4
           fi
 
+      - name: Collect runtime DLLs
+        if: env.HAVE_DISC == 'true'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp build/mp7.exe dist/
+          # Copy MinGW runtime DLLs needed to run on machines without MinGW
+          for dll in libwinpthread-1.dll libgcc_s_seh-1.dll libstdc++-6.dll; do
+            path=$(where $dll 2>/dev/null || find /c/mingw64 /c/mingw /c/msys64 -name "$dll" 2>/dev/null | head -1)
+            if [ -f "$path" ]; then
+              cp "$path" dist/
+              echo "Copied $dll"
+            else
+              echo "WARNING: $dll not found"
+            fi
+          done
+          # Copy SDL2 if present
+          find build -name "SDL2.dll" -exec cp {} dist/ \; 2>/dev/null || true
+          ls -la dist/
+
       - name: Upload binary
         if: env.HAVE_DISC == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: mp7-windows
-          path: build/mp7.exe
-          if-no-files-found: ignore
+          path: dist/
+          if-no-files-found: warn
