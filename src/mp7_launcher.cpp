@@ -487,8 +487,10 @@ bool launcher_run(const char* default_path, char* out, int out_len) {
 
     // Button layout
     const int BTN_W = 160, BTN_H = 42;
+    const int LY = 236;
     Btn browse_btn = {W - 180, 118, BTN_W, BTN_H, false, false};
     Btn launch_btn = {W - 180, 170, BTN_W, BTN_H, false, false};
+    Btn log_folder_btn = {W - 180, LY + 3, BTN_W, 28, false, false};
 
     bool running = true, result = false;
     float anim = 0.0f;
@@ -507,6 +509,7 @@ bool launcher_run(const char* default_path, char* out, int out_len) {
         SDL_GetMouseState(&mx, &my);
         browse_btn.hovered = btn_hit(browse_btn, mx, my);
         launch_btn.hovered = iso_ok && btn_hit(launch_btn, mx, my);
+        log_folder_btn.hovered = btn_hit(log_folder_btn, mx, my);
 
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -529,6 +532,25 @@ bool launcher_run(const char* default_path, char* out, int out_len) {
                         }
                     } else if (iso_ok && btn_hit(launch_btn, e.button.x, e.button.y)) {
                         result = true; running = false;
+                    } else if (btn_hit(log_folder_btn, e.button.x, e.button.y)) {
+#ifdef _WIN32
+                        char selected_folder[MAX_PATH] = {};
+                        if (choose_log_folder(selected_folder, sizeof(selected_folder))) {
+                            char error[512] = {};
+                            if (apply_runtime_log_folder(selected_folder, error, sizeof(error))) {
+                                strncpy(s_log_folder, selected_folder, sizeof(s_log_folder) - 1);
+                                cfg_save_config();
+                                cn_log(0, "Diagnostic output folder: %s", s_log_folder);
+                            } else {
+                                cn_log(2, "Could not use diagnostic folder: %s", error);
+                                MessageBoxA(win ? GetActiveWindow() : NULL, error,
+                                            "Cruise Navigator log folder",
+                                            MB_OK | MB_ICONERROR);
+                            }
+                        }
+#else
+                        cn_log(1, "Log folder selection is currently supported on Windows builds.");
+#endif
                     }
                 }
                 break;
@@ -604,18 +626,30 @@ bool launcher_run(const char* default_path, char* out, int out_len) {
         draw_btn(rend, launch_btn, iso_ok ? "Launch!" : "No disc", lc, lf, 2);
 
         // ── Log panel ──
-        const int LY = 236;
         SDL_SetRenderDrawBlendMode(rend, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(rend, 5, 12, 25, 200);
         SDL_Rect log_r = {12, LY, W-24, H - LY - 42};
         SDL_RenderFillRect(rend, &log_r);
         SDL_SetRenderDrawBlendMode(rend, SDL_BLENDMODE_NONE);
         draw_rect(rend, 12, LY, W-24, H - LY - 42, C_BORDER);
-        draw_str(rend, 24, LY+8, "LOG", C_DIM, 1);
+        draw_str(rend, 24, LY+8, "LOG OUTPUT:", C_DIM, 1);
+
+        char log_folder_label[128] = {};
+        const char* log_folder_display = s_log_folder[0] ? s_log_folder : "Default (beside EXE)";
+        const char* folder_slash = strrchr(log_folder_display, '\\');
+        const char* folder_slash2 = strrchr(log_folder_display, '/');
+        if (folder_slash2 && (!folder_slash || folder_slash2 > folder_slash)) folder_slash = folder_slash2;
+        const char* folder_name = folder_slash ? folder_slash + 1 : log_folder_display;
+        snprintf(log_folder_label, sizeof(log_folder_label), "%s", folder_name);
+        if (strlen(folder_name) > 70) {
+            strcpy(log_folder_label + 67, "...");
+        }
+        draw_str(rend, 112, LY+8, log_folder_label, C_GOLD, 1);
+        draw_btn(rend, log_folder_btn, "CHANGE FOLDER", C_PANEL, C_WHITE, 1);
 
         const int LPAD = 24, LLINE = 12;
-        int ly_start = LY + 24;
-        int max_lines = (H - LY - 42 - 24) / LLINE;
+        int ly_start = LY + 36;
+        int max_lines = (H - LY - 42 - 36) / LLINE;
         int from = s_log_n > max_lines ? s_log_n - max_lines : 0;
         for (int i = from; i < s_log_n; i++) {
             const CnLine* ll = &s_log[i % CN_LOG_MAX];
@@ -635,7 +669,7 @@ bool launcher_run(const char* default_path, char* out, int out_len) {
         SDL_Rect bot_r = {0, H-36, W, 36};
         SDL_RenderFillRect(rend, &bot_r);
         SDL_SetRenderDrawBlendMode(rend, SDL_BLENDMODE_NONE);
-        draw_str(rend, 16, H-26, "[B] Browse   [Enter] Launch   [Esc] Quit", C_DIM, 1);
+        draw_str(rend, 16, H-26, "[B] Browse   [Enter] Launch   [Esc] Quit   [Log Output] Change Folder", C_DIM, 1);
         // Version right-aligned
         const char* ver = "Cruise Navigator v0.1";
         draw_str(rend, W - str_w(ver, 1) - 16, H-26, ver, C_BORDER, 1);
@@ -650,7 +684,8 @@ bool launcher_run(const char* default_path, char* out, int out_len) {
 
     if (result && iso[0]) {
         strncpy(out, iso, out_len-1); out[out_len-1] = 0;
-        cfg_save(out);
+        strncpy(s_saved, out, sizeof(s_saved) - 1);
+        cfg_save_config();
         cn_log(0, "Launching: %s", out);
     }
     return result;
