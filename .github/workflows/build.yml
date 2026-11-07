@@ -60,58 +60,43 @@ jobs:
         shell: bash
         run: |
           if [ "$HAVE_DISC" == "true" ]; then
-            cmake --build build --target mp7 -j4
+            cmake --build build --target CruiseNavigator -j4
           else
             cmake --build build --target runtime_check -j4
           fi
 
-      - name: Collect runtime DLLs
+      - name: Collect release files
         if: env.HAVE_DISC == 'true'
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path dist
-          Copy-Item build\mp7.exe dist\
+          Copy-Item build\CruiseNavigator.exe dist\
 
-          # Find MinGW DLLs - check all common locations on the GitHub runner
-          $dllNames = @("libwinpthread-1.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll")
-          $searchPaths = @(
-            "C:\mingw64\bin",
-            "C:\mingw\bin",
-            "C:\msys64\mingw64\bin",
-            "C:\msys64\usr\bin",
-            "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin"
-          )
+          # Launcher HTML config UI
+          Copy-Item launcher\cruise_navigator.html dist\ -ErrorAction SilentlyContinue
 
-          foreach ($dll in $dllNames) {
-            $found = $false
-            foreach ($path in $searchPaths) {
-              $full = Join-Path $path $dll
-              if (Test-Path $full) {
-                Copy-Item $full dist\
-                Write-Host "Copied $dll from $path"
-                $found = $true
-                break
-              }
-            }
-            if (-not $found) {
-              Write-Host "WARNING: $dll not found in any search path"
+          # MinGW runtime DLLs
+          $dlls = @("libwinpthread-1.dll","libgcc_s_seh-1.dll","libstdc++-6.dll")
+          $paths = @("C:\mingw64\bin","C:\msys64\mingw64\bin","C:\msys64\usr\bin",
+                     "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin")
+          foreach ($dll in $dlls) {
+            foreach ($p in $paths) {
+              $f = Join-Path $p $dll
+              if (Test-Path $f) { Copy-Item $f dist\; Write-Host "Copied $dll"; break }
             }
           }
 
-          # Find SDL2.dll in build tree
+          # SDL2
           $sdl = Get-ChildItem -Path build -Filter SDL2.dll -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($sdl) {
-            Copy-Item $sdl.FullName dist\
-            Write-Host "Copied SDL2.dll"
-          }
+          if ($sdl) { Copy-Item $sdl.FullName dist\ }
 
-          Write-Host "--- dist contents ---"
+          Write-Host "--- dist ---"
           Get-ChildItem dist
 
-      - name: Upload binary
+      - name: Upload release
         if: env.HAVE_DISC == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: mp7-windows
+          name: CruiseNavigator-windows
           path: dist/
           if-no-files-found: warn
