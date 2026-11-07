@@ -31,11 +31,15 @@ gcn_add_game(
     ${CMAKE_SOURCE_DIR}/src/mp7_launcher.cpp
   FPS          60)
 
-# Rename the output binary to CruiseNavigator(.exe).
-set_target_properties(CruiseNavigator PROPERTIES OUTPUT_NAME "CruiseNavigator")
+# The desktop executable exists only when a valid game image was supplied.
+# In compile-only CI builds, runtime_check still validates the runtime and launcher sources.
+if(TARGET CruiseNavigator)
+  # Rename the output binary to CruiseNavigator(.exe).
+  set_target_properties(CruiseNavigator PROPERTIES OUTPUT_NAME "CruiseNavigator")
 
-# The native launcher uses GetOpenFileNameA. Hide the console and use WinMain.
-if(WIN32)
-  set_target_properties(CruiseNavigator PROPERTIES WIN32_EXECUTABLE TRUE)
-  target_link_libraries(CruiseNavigator PRIVATE comdlg32 shell32 ole32)
+  # The native launcher uses Windows file/folder dialogs. Hide the console and use WinMain.
+  if(WIN32)
+    set_target_properties(CruiseNavigator PROPERTIES WIN32_EXECUTABLE TRUE)
+    target_link_libraries(CruiseNavigator PRIVATE comdlg32 shell32 ole32)
+  endif()
 endif()
