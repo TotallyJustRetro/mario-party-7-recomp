@@ -72,9 +72,6 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist
           Copy-Item build\CruiseNavigator.exe dist\
 
-          # Launcher HTML config UI
-          Copy-Item launcher\cruise_navigator.html dist\ -ErrorAction SilentlyContinue
-
           # MinGW runtime DLLs
           $dlls = @("libwinpthread-1.dll","libgcc_s_seh-1.dll","libstdc++-6.dll")
           $paths = @("C:\mingw64\bin","C:\msys64\mingw64\bin","C:\msys64\usr\bin",
