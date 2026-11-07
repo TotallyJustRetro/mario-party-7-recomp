@@ -35,12 +35,17 @@ jobs:
         run: |
           if [ -n "$GAME_URL" ]; then
             echo "Downloading disc..."
-            curl -L -o game_input.rvz "$GAME_URL"
-            echo "Converting RVZ to ISO..."
-            gcn-recomp/tools/dtk.exe disc convert game_input.rvz game.iso
-            echo "HAVE_DISC=true" >> $GITHUB_ENV
+            if curl --fail --location --retry 2 --retry-delay 2 -o game_input.rvz "$GAME_URL" &&
+               [ -s game_input.rvz ] &&
+               gcn-recomp/tools/dtk.exe disc convert game_input.rvz game.iso; then
+              echo "HAVE_DISC=true" >> $GITHUB_ENV
+            else
+              echo "::warning::Disc download or RVZ conversion failed. Falling back to compile-only validation."
+              rm -f game_input.rvz game.iso
+              echo "HAVE_DISC=false" >> $GITHUB_ENV
+            fi
           else
-            echo "No GAME_ISO_URL secret - building runtime_check only"
+            echo "No GAME_ISO_URL secret - building runtime and launcher compile checks"
             echo "HAVE_DISC=false" >> $GITHUB_ENV
           fi
 
