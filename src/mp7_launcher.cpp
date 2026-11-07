@@ -20,6 +20,7 @@
 #include <time.h>
 #include <stdarg.h>
 #include <math.h>
+#include <errno.h>
 
 // ── config ───────────────────────────────────────────────────────────────────
 
@@ -532,47 +533,229 @@ bool launcher_run(const char* default_path, char* out, int out_len) {
 // ── Windows entry / diagnostic redirect ──────────────────────────────────────
 
 #ifdef _WIN32
-static void redirect_runtime_log() {
-    char exe[MAX_PATH]={0}, dir[MAX_PATH]={0};
-    GetModuleFileNameA(NULL, exe, MAX_PATH);
-    strncpy(dir, exe, MAX_PATH-1);
-    char* p = strrchr(dir,'\\'); if (!p) p = strrchr(dir,'/');
-    if (p) *p = 0;
+static bool ensure_diagnostic_directory(const char* path, DWORD* error_code) {
+    if (CreateDirectoryA(path, NULL)) return true;
 
-    char crash_dir[MAX_PATH]; snprintf(crash_dir, MAX_PATH, "%s\\crash", dir);
-    CreateDirectoryA(crash_dir, NULL);  // ok if already exists
+    DWORD code = GetLastError();
+    if (code == ERROR_ALREADY_EXISTS) {
+        DWORD attrs = GetFileAttributesA(path);
+        if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+            return true;
+        }
+        code = ERROR_DIRECTORY;
+    }
 
-    char log_path[MAX_PATH]; snprintf(log_path, MAX_PATH, "%s\\runtime.log", crash_dir);
-    char dump_path[MAX_PATH]; snprintf(dump_path, MAX_PATH, "%s\\ramdump.bin", crash_dir);
+    if (error_code) *error_code = code;
+    return false;
+}
+
+static bool make_temp_diagnostic_paths(char* dir, size_t dir_size,
+                                       char* log_path, size_t log_size,
+                                       char* dump_path, size_t dump_size,
+                                       DWORD* error_code) {
+    char temp[MAX_PATH] = {};
+    DWORD n = GetTempPathA((DWORD)sizeof(temp), temp);
+    if (n == 0 || n >= sizeof(temp)) {
+        if (error_code) *error_code = n == 0 ? GetLastError() : ERROR_INSUFFICIENT_BUFFER;
+        return false;
+    }
+
+    int written = snprintf(dir, dir_size, "%sCruiseNavigator-crash", temp);
+    if (written < 0 || (size_t)written >= dir_size) {
+        if (error_code) *error_code = ERROR_INSUFFICIENT_BUFFER;
+        return false;
+    }
+    if (!ensure_diagnostic_directory(dir, error_code)) return false;
+
+    written = snprintf(log_path, log_size, "%s\\runtime.log", dir);
+    if (written < 0 || (size_t)written >= log_size) {
+        if (error_code) *error_code = ERROR_INSUFFICIENT_BUFFER;
+        return false;
+    }
+    written = snprintf(dump_path, dump_size, "%s\\ramdump.bin", dir);
+    if (written < 0 || (size_t)written >= dump_size) {
+        if (error_code) *error_code = ERROR_INSUFFICIENT_BUFFER;
+        return false;
+    }
+    return true;
+}
+
+static bool redirect_runtime_log() {
+    char exe[MAX_PATH] = {};
+    char dir[MAX_PATH] = {};
+    char crash_dir[MAX_PATH] = {};
+    char log_path[MAX_PATH] = {};
+    char dump_path[MAX_PATH] = {};
+    const char* failure_stage = NULL;
+    DWORD failure_code = ERROR_SUCCESS;
+    bool using_temp_fallback = false;
+
+    DWORD exe_len = GetModuleFileNameA(NULL, exe, (DWORD)sizeof(exe));
+    if (exe_len == 0 || exe_len >= sizeof(exe)) {
+        failure_stage = "GetModuleFileNameA";
+        failure_code = exe_len == 0 ? GetLastError() : ERROR_INSUFFICIENT_BUFFER;
+    } else {
+        strncpy(dir, exe, sizeof(dir) - 1);
+        char* slash = strrchr(dir, '\\');
+        if (!slash) slash = strrchr(dir, '/');
+        if (!slash) {
+            failure_stage = "locating executable directory";
+            failure_code = ERROR_BAD_PATHNAME;
+        } else {
+            *slash = 0;
+            int written = snprintf(crash_dir, sizeof(crash_dir), "%s\\crash", dir);
+            if (written < 0 || (size_t)written >= sizeof(crash_dir)) {
+                failure_stage = "building crash directory path";
+                failure_code = ERROR_INSUFFICIENT_BUFFER;
+            } else if (!ensure_diagnostic_directory(crash_dir, &failure_code)) {
+                failure_stage = "CreateDirectoryA(crash)";
+            }
+        }
+    }
+
+    if (!failure_stage) {
+        int a = snprintf(log_path, sizeof(log_path), "%s\\runtime.log", crash_dir);
+        int b = snprintf(dump_path, sizeof(dump_path), "%s\\ramdump.bin", crash_dir);
+        if (a < 0 || (size_t)a >= sizeof(log_path) ||
+            b < 0 || (size_t)b >= sizeof(dump_path)) {
+            failure_stage = "building diagnostic file paths";
+            failure_code = ERROR_INSUFFICIENT_BUFFER;
+        }
+    }
+
+    if (failure_stage) {
+        using_temp_fallback = true;
+        if (!make_temp_diagnostic_paths(crash_dir, sizeof(crash_dir),
+                                        log_path, sizeof(log_path),
+                                        dump_path, sizeof(dump_path),
+                                        &failure_code)) {
+            char message[1024];
+            snprintf(message, sizeof(message),
+                     "Cruise Navigator could not initialize diagnostics.\n"
+                     "Stage: %s\nWindows error: %lu\n"
+                     "The temporary diagnostics directory could not be created either.",
+                     failure_stage, (unsigned long)failure_code);
+            MessageBoxA(NULL, message, "Cruise Navigator startup error",
+                        MB_OK | MB_ICONERROR | MB_SYSTEMMODAL);
+            return false;
+        }
+    }
+
+    HANDLE log_handle = CreateFileA(log_path, FILE_APPEND_DATA,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                    NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (log_handle == INVALID_HANDLE_VALUE && !using_temp_fallback) {
+        failure_stage = "CreateFileA(runtime.log)";
+        failure_code = GetLastError();
+        using_temp_fallback = true;
+        if (make_temp_diagnostic_paths(crash_dir, sizeof(crash_dir),
+                                       log_path, sizeof(log_path),
+                                       dump_path, sizeof(dump_path),
+                                       &failure_code)) {
+            log_handle = CreateFileA(log_path, FILE_APPEND_DATA,
+                                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                     NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        }
+    }
+
+    if (log_handle == INVALID_HANDLE_VALUE) {
+        DWORD code = GetLastError();
+        char message[1024];
+        snprintf(message, sizeof(message),
+                 "Cruise Navigator could not open its diagnostic log.\n"
+                 "Path: %s\nWindows error: %lu",
+                 log_path, (unsigned long)code);
+        MessageBoxA(NULL, message, "Cruise Navigator startup error",
+                    MB_OK | MB_ICONERROR | MB_SYSTEMMODAL);
+        return false;
+    }
+
+    SetFilePointer(log_handle, 0, NULL, FILE_END);
+    char startup[2048];
+    int startup_len = snprintf(
+        startup, sizeof(startup),
+        "\n=== Cruise Navigator startup %s %s ===\n"
+        "[diag] executable: %s\n"
+        "[diag] diagnostic directory: %s\n"
+        "[diag] log: %s\n"
+        "[diag] RAM dump: %s\n",
+        __DATE__, __TIME__, exe, crash_dir, log_path, dump_path);
+    if (startup_len > 0) {
+        DWORD written = 0;
+        WriteFile(log_handle, startup, (DWORD)startup_len, &written, NULL);
+    }
+
+    if (using_temp_fallback) {
+        char fallback_line[512];
+        snprintf(fallback_line, sizeof(fallback_line),
+                 "[diag] WARNING: beside-executable diagnostics failed at %s "
+                 "(Windows error %lu); using TEMP fallback.\n",
+                 failure_stage ? failure_stage : "unknown stage",
+                 (unsigned long)failure_code);
+        DWORD written = 0;
+        WriteFile(log_handle, fallback_line, (DWORD)strlen(fallback_line), &written, NULL);
+    }
+    CloseHandle(log_handle);
 
     SetEnvironmentVariableA("GCN_RAM_DUMP", dump_path);
     SetEnvironmentVariableA("GCN_TRACE_DEPTH", "64");
     SetEnvironmentVariableA("GCN_DIAGNOSTIC_DIR", crash_dir);
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
 
-    if (FILE* lf = freopen(log_path, "a", stderr)) {
-        int fd = _fileno(stderr);
-        if (fd >= 0) {
-            _dup2(fd, 1);
-            HANDLE h = (HANDLE)_get_osfhandle(fd);
-            if (h != INVALID_HANDLE_VALUE) {
-                SetStdHandle(STD_ERROR_HANDLE, h);
-                SetStdHandle(STD_OUTPUT_HANDLE, h);
-            }
+    if (!freopen(log_path, "a", stderr)) {
+        int crt_error = errno;
+        HANDLE h = CreateFileA(log_path, FILE_APPEND_DATA,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h != INVALID_HANDLE_VALUE) {
+            char line[256];
+            int n = snprintf(line, sizeof(line),
+                             "[diag] freopen(stderr) failed; CRT errno=%d\n", crt_error);
+            DWORD written = 0;
+            if (n > 0) WriteFile(h, line, (DWORD)n, &written, NULL);
+            CloseHandle(h);
         }
-        setvbuf(stdout, NULL, _IONBF, 0);
-        setvbuf(stderr, NULL, _IONBF, 0);
-        fprintf(stderr, "\n=== Cruise Navigator %s %s ===\n", __DATE__, __TIME__);
-        fprintf(stderr, "[diag] dir: %s\n[diag] log: %s\n[diag] dump: %s\n",
-                dir, log_path, dump_path);
-        fflush(stderr);
+        char message[1024];
+        snprintf(message, sizeof(message),
+                 "Cruise Navigator created its startup log, but could not redirect runtime output.\n"
+                 "Log: %s\nCRT error: %d",
+                 log_path, crt_error);
+        MessageBoxA(NULL, message, "Cruise Navigator startup error",
+                    MB_OK | MB_ICONERROR | MB_SYSTEMMODAL);
+        return false;
     }
+
+    int fd = _fileno(stderr);
+    if (fd >= 0) {
+        _dup2(fd, 1);
+        HANDLE h = (HANDLE)_get_osfhandle(fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            SetStdHandle(STD_ERROR_HANDLE, h);
+            SetStdHandle(STD_OUTPUT_HANDLE, h);
+        }
+    }
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+
+    if (using_temp_fallback) {
+        char message[1024];
+        snprintf(message, sizeof(message),
+                 "Cruise Navigator could not write diagnostics beside its executable.\n"
+                 "A Windows error occurred during startup setup (code %lu).\n"
+                 "Diagnostics are being saved here:\n%s",
+                 (unsigned long)failure_code, log_path);
+        MessageBoxA(NULL, message, "Cruise Navigator diagnostics moved",
+                    MB_OK | MB_ICONWARNING | MB_SYSTEMMODAL);
+    }
+
+    fprintf(stderr, "[diag] runtime output redirection ready\n");
+    fflush(stderr);
+    return true;
 }
 
 extern int main(int argc, char** argv);
 extern int __argc; extern char** __argv;
 int WINAPI WinMain(HINSTANCE,HINSTANCE,LPSTR,int) {
-    redirect_runtime_log();
+    if (!redirect_runtime_log()) return 1;
     return main(__argc, __argv);
-}
-#endif
+}#endif
