@@ -38,9 +38,9 @@ The Windows GUI executable redirects runtime diagnostics to `CruiseNavigator.log
 
 ## Crash diagnostics
 
-The Windows build writes persistent diagnostics under `%LOCALAPPDATA%\CruiseNavigator\logs\`:
+The Windows build creates a `crash` folder directly beside `CruiseNavigator.exe`:
 
-- `runtime.log`: standard output, fatal errors, CPU registers, host backtrace, and guest call stack
-- `ramdump.bin`: the guest RAM snapshot captured when an indirect call cannot be resolved
+- `crash/runtime.log`: startup output, fatal errors, registers, host backtrace, and guest call stack
+- `crash/ramdump.bin`: guest RAM snapshot captured when an indirect call cannot be resolved
 
-The diagnostic build enables `GCN_TRACE_CALLS` and sets `GCN_RAM_DUMP` before the game runtime starts. The RAM dump is approximately 24 MiB. Share `runtime.log` first; the RAM dump is only needed for deeper memory inspection.
+The build enables `GCN_TRACE_CALLS` and sets `GCN_RAM_DUMP` before the game runtime starts. The RAM dump is approximately 24 MiB. If Windows cannot create the folder (for example, when the game is installed under a protected directory), the program displays an error instead of silently switching to AppData.
