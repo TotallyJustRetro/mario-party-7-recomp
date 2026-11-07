@@ -345,34 +345,84 @@ bool launcher_run(const char* default_path, char* out, int out_len) {
 }
 
 #ifdef _WIN32
-// Build as a GUI-subsystem executable so users see the launcher, not a console window.
-// Runtime diagnostics are redirected beside the executable for troubleshooting.
+// Build as a GUI-subsystem executable. Persistent diagnostics live in the user's
+// LocalAppData directory so writing logs never depends on the install folder being writable.
 extern int main(int argc, char** argv);
 extern int __argc;
 extern char** __argv;
 
 static void redirect_runtime_log() {
     char exe_path[MAX_PATH] = {0};
-    const DWORD length = GetModuleFileNameA(NULL, exe_path, MAX_PATH);
-    if (length == 0 || length >= MAX_PATH) return;
+    DWORD exe_len = GetModuleFileNameA(NULL, exe_path, MAX_PATH);
+    char exe_dir[MAX_PATH] = {0};
+    if (exe_len > 0 && exe_len < MAX_PATH) {
+        strncpy(exe_dir, exe_path, sizeof exe_dir - 1);
+        char* slash = strrchr(exe_dir, '\\');
+        if (slash) *slash = 0;
+    }
 
-    char* slash = strrchr(exe_path, '\\');
-    if (!slash) return;
-    *slash = 0;
+    char root[MAX_PATH] = {0};
+    DWORD root_len = GetEnvironmentVariableA("LOCALAPPDATA", root, MAX_PATH);
+    if (root_len == 0 || root_len >= MAX_PATH) {
+        strncpy(root, exe_dir[0] ? exe_dir : ".", sizeof root - 1);
+    }
+
+    char app_dir[MAX_PATH] = {0};
+    char log_dir[MAX_PATH] = {0};
+    snprintf(app_dir, sizeof app_dir, "%s\\CruiseNavigator", root);
+    CreateDirectoryA(app_dir, NULL);
+    snprintf(log_dir, sizeof log_dir, "%s\\logs", app_dir);
+    if (!CreateDirectoryA(log_dir, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) {
+        // Fallback beside the executable if LocalAppData is unavailable.
+        snprintf(app_dir, sizeof app_dir, "%s\\CruiseNavigator", exe_dir[0] ? exe_dir : ".");
+        CreateDirectoryA(app_dir, NULL);
+        snprintf(log_dir, sizeof log_dir, "%s\\logs", app_dir);
+        CreateDirectoryA(log_dir, NULL);
+    }
 
     char log_path[MAX_PATH] = {0};
-    snprintf(log_path, sizeof log_path, "%s\\CruiseNavigator.log", exe_path);
-    FILE* log_file = fopen(log_path, "a");
-    if (!log_file) return;
+    char dump_path[MAX_PATH] = {0};
+    snprintf(log_path, sizeof log_path, "%s\\runtime.log", log_dir);
+    snprintf(dump_path, sizeof dump_path, "%s\\ramdump.bin", log_dir);
 
-    const int fd = _fileno(log_file);
-    if (fd >= 0) {
-        _dup2(fd, _fileno(stdout));
-        _dup2(fd, _fileno(stderr));
+    // The runtime's indirect-call failure handler already understands this variable
+    // and writes guest RAM (24 MiB) before aborting.
+    SetEnvironmentVariableA("GCN_RAM_DUMP", dump_path);
+    SetEnvironmentVariableA("GCN_TRACE_DEPTH", "64");
+    SetEnvironmentVariableA("GCN_DIAGNOSTIC_DIR", log_dir);
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+
+    FILE* log_file = freopen(log_path, "a", stderr);
+    if (log_file) {
+        const int fd = _fileno(stderr);
+        if (fd >= 0) {
+            _dup2(fd, 1); // stdout and stderr share the same append-only log
+            HANDLE log_handle = (HANDLE)_get_osfhandle(fd);
+            if (log_handle != INVALID_HANDLE_VALUE) {
+                SetStdHandle(STD_ERROR_HANDLE, log_handle);
+                SetStdHandle(STD_OUTPUT_HANDLE, log_handle);
+            }
+        }
+        setvbuf(stdout, NULL, _IONBF, 0);
+        setvbuf(stderr, NULL, _IONBF, 0);
+        fprintf(stderr, "\n========== Cruise Navigator startup ==========\n");
+        fprintf(stderr, "[diagnostics] log: %s\n", log_path);
+        fprintf(stderr, "[diagnostics] RAM dump: %s\n", dump_path);
+        fprintf(stderr, "[diagnostics] executable: %s\n", exe_path);
+        fprintf(stderr, "[diagnostics] build: %s %s\n", __DATE__, __TIME__);
+        fflush(stderr);
+    } else {
+        // Keep a minimal error record even if LocalAppData redirection fails.
+        char fallback[MAX_PATH] = {0};
+        snprintf(fallback, sizeof fallback, "%s\\CruiseNavigator-log-open-failed.txt",
+                 exe_dir[0] ? exe_dir : ".");
+        FILE* f = fopen(fallback, "a");
+        if (f) {
+            fprintf(f, "Could not open runtime log at %s (error %lu)\n",
+                    log_path, (unsigned long)GetLastError());
+            fclose(f);
+        }
     }
-    fclose(log_file);
-    setvbuf(stdout, NULL, _IONBF, 0);
-    setvbuf(stderr, NULL, _IONBF, 0);
 }
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
