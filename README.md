@@ -27,3 +27,11 @@ cmake --build build
 - CMake 3.20+, Ninja, Python 3, a C++20 compiler
 - SDL2 (Linux: `sudo apt install libsdl2-dev`; Windows: built automatically)
 - Your own Mario Party 7 USA disc image
+
+## Cruise Navigator startup
+
+On Windows, the desktop executable opens the native Cruise Navigator disc picker before starting the game. It remembers the selected ISO/CISO/GCM path in `cruise_navigator.cfg` beside the executable. Passing a disc path directly on the command line bypasses the picker.
+
+CMake applies the small, idempotent startup hook to the checked-out `gcn-recomp/runtime/main.cpp` before building. If the upstream entry point changes, configuration stops with a clear error instead of producing an executable that silently skips the launcher. The HTML file supplied with the launcher design is only a visual prototype; it is not connected to the native launch backend.
+
+The Windows GUI executable redirects runtime diagnostics to `CruiseNavigator.log` beside the executable rather than opening a separate command window. A crash after selecting Launch can still indicate a separate recompilation issue; the launcher does not repair missing guest functions.
