@@ -756,20 +756,34 @@ static bool redirect_runtime_log() {
         failure_stage = "GetModuleFileNameA";
         failure_code = exe_len == 0 ? GetLastError() : ERROR_INSUFFICIENT_BUFFER;
     } else {
-        strncpy(dir, exe, sizeof(dir) - 1);
-        char* slash = strrchr(dir, '\\');
-        if (!slash) slash = strrchr(dir, '/');
-        if (!slash) {
-            failure_stage = "locating executable directory";
-            failure_code = ERROR_BAD_PATHNAME;
-        } else {
-            *slash = 0;
-            int written = snprintf(crash_dir, sizeof(crash_dir), "%s\\crash", dir);
-            if (written < 0 || (size_t)written >= sizeof(crash_dir)) {
-                failure_stage = "building crash directory path";
-                failure_code = ERROR_INSUFFICIENT_BUFFER;
-            } else if (!ensure_diagnostic_directory(crash_dir, &failure_code)) {
-                failure_stage = "CreateDirectoryA(crash)";
+        // Use the previously selected folder immediately on later launches.
+        if (s_log_folder[0]) {
+            DWORD attrs = GetFileAttributesA(s_log_folder);
+            if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+                strncpy(crash_dir, s_log_folder, sizeof(crash_dir) - 1);
+            } else {
+                failure_stage = "saved log folder";
+                failure_code = attrs == INVALID_FILE_ATTRIBUTES ? GetLastError() : ERROR_DIRECTORY;
+            }
+        }
+
+        // First launch (or no custom folder): default to a crash folder beside the EXE.
+        if (!failure_stage && !crash_dir[0]) {
+            strncpy(dir, exe, sizeof(dir) - 1);
+            char* slash = strrchr(dir, '\\');
+            if (!slash) slash = strrchr(dir, '/');
+            if (!slash) {
+                failure_stage = "locating executable directory";
+                failure_code = ERROR_BAD_PATHNAME;
+            } else {
+                *slash = 0;
+                int written = snprintf(crash_dir, sizeof(crash_dir), "%s\\crash", dir);
+                if (written < 0 || (size_t)written >= sizeof(crash_dir)) {
+                    failure_stage = "building crash directory path";
+                    failure_code = ERROR_INSUFFICIENT_BUFFER;
+                } else if (!ensure_diagnostic_directory(crash_dir, &failure_code)) {
+                    failure_stage = "CreateDirectoryA(crash)";
+                }
             }
         }
     }
@@ -917,6 +931,7 @@ static bool redirect_runtime_log() {
 extern int main(int argc, char** argv);
 extern int __argc; extern char** __argv;
 int WINAPI WinMain(HINSTANCE,HINSTANCE,LPSTR,int) {
+    cfg_load();
     if (!redirect_runtime_log()) return 1;
     return main(__argc, __argv);
 }
