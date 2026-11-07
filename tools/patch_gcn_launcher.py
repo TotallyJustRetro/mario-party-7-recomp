@@ -8,6 +8,7 @@ from pathlib import Path
 
 MAIN_MARKER = "// CRUISE_NAVIGATOR_LAUNCHER_HOOK"
 CPU_MARKER = "// CRUISE_NAVIGATOR_CALL_TRACE_HOOK"
+RUNTIME_CHECK_MARKER = "# CRUISE_NAVIGATOR_LAUNCHER_COMPILE_CHECK"
 
 
 def replace_once(source: str, old: str, new: str, label: str) -> str:
@@ -119,9 +120,36 @@ def patch_cpu(path: Path) -> None:
     print(f"Installed Cruise Navigator call-trace hook in {path}")
 
 
+def patch_runtime_check(cmake_path: Path) -> None:
+    if not cmake_path.is_file():
+        raise FileNotFoundError(f"gcn-recomp CMakeLists not found: {cmake_path}")
+
+    source = cmake_path.read_text(encoding="utf-8")
+    if RUNTIME_CHECK_MARKER in source:
+        print(f"Cruise Navigator launcher compile check already installed in {cmake_path}")
+        return
+
+    anchor = (
+        "    target_compile_definitions(runtime_check PRIVATE ${GCN_GAME_DEFS} ${GCN_ENTRY_DEFS} ${GCN_GL_DEFS})\n"
+        "  endif()"
+    )
+    replacement = (
+        "    target_compile_definitions(runtime_check PRIVATE ${GCN_GAME_DEFS} ${GCN_ENTRY_DEFS} ${GCN_GL_DEFS})\n"
+        "    if(WIN32)\n"
+        f"      {RUNTIME_CHECK_MARKER}\n"
+        "      target_sources(runtime_check PRIVATE ${CMAKE_SOURCE_DIR}/src/mp7_launcher.cpp)\n"
+        "    endif()\n"
+        "  endif()"
+    )
+    updated = replace_once(source, anchor, replacement, "runtime_check target configuration")
+    cmake_path.write_text(updated, encoding="utf-8", newline="\\n")
+    print(f"Installed Cruise Navigator launcher compile check in {cmake_path}")
+
+
 def patch(runtime_main: Path) -> None:
     patch_main(runtime_main)
     patch_cpu(runtime_main.with_name("cpu.cpp"))
+    patch_runtime_check(runtime_main.parent.parent / "CMakeLists.txt")
 
 
 if __name__ == "__main__":
