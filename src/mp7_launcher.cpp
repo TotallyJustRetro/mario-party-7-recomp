@@ -244,6 +244,9 @@ static bool apply_runtime_log_folder(const char* folder, char* error, size_t err
     SetEnvironmentVariableA("GCN_RAM_DUMP", dump_path);
     SetEnvironmentVariableA("GCN_TRACE_DEPTH", "64");
     SetEnvironmentVariableA("GCN_DIAGNOSTIC_DIR", folder);
+    _putenv_s("GCN_RAM_DUMP", dump_path);
+    _putenv_s("GCN_TRACE_DEPTH", "64");
+    _putenv_s("GCN_DIAGNOSTIC_DIR", folder);
     fprintf(stderr, "[diag] runtime log destination changed to: %s\n", folder);
     fflush(stderr);
     return true;
@@ -882,6 +885,9 @@ static bool redirect_runtime_log() {
     SetEnvironmentVariableA("GCN_RAM_DUMP", dump_path);
     SetEnvironmentVariableA("GCN_TRACE_DEPTH", "64");
     SetEnvironmentVariableA("GCN_DIAGNOSTIC_DIR", crash_dir);
+    _putenv_s("GCN_RAM_DUMP", dump_path);
+    _putenv_s("GCN_TRACE_DEPTH", "64");
+    _putenv_s("GCN_DIAGNOSTIC_DIR", crash_dir);
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
 
     if (!freopen(log_path, "a", stderr)) {
