@@ -50,10 +50,12 @@ jobs:
           if [ "$HAVE_DISC" == "true" ]; then
             cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
               -DGCN_OPENXR=OFF \
+              -DGCN_TRACE_CALLS=ON \
               -DGAME_ISO=game.iso
           else
             cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-              -DGCN_OPENXR=OFF
+              -DGCN_OPENXR=OFF \
+              -DGCN_TRACE_CALLS=ON
           fi
 
       - name: Build
