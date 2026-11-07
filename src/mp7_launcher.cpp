@@ -240,7 +240,6 @@ static bool apply_runtime_log_folder(const char* folder, char* error, size_t err
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
 
-    strncpy(s_active_log_dir, crash_dir, sizeof(s_active_log_dir) - 1);
     strncpy(s_active_log_dir, folder, sizeof(s_active_log_dir) - 1);
     SetEnvironmentVariableA("GCN_RAM_DUMP", dump_path);
     SetEnvironmentVariableA("GCN_TRACE_DEPTH", "64");
@@ -879,6 +878,7 @@ static bool redirect_runtime_log() {
     }
     CloseHandle(log_handle);
 
+    strncpy(s_active_log_dir, crash_dir, sizeof(s_active_log_dir) - 1);
     SetEnvironmentVariableA("GCN_RAM_DUMP", dump_path);
     SetEnvironmentVariableA("GCN_TRACE_DEPTH", "64");
     SetEnvironmentVariableA("GCN_DIAGNOSTIC_DIR", crash_dir);
