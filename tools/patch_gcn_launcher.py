@@ -86,7 +86,7 @@ def patch_cpu(path: Path) -> None:
     updated = replace_once(
         updated,
         '    // GCN_RAM_DUMP=<path>: the guest RAM at this failure, for finding out what the code at\n'
-        '    // address is and where it came from.\n'
+        '    // ' + chr(96) + 'addr' + chr(96) + ' is and where it came from.\n'
         '    if (const char* path = getenv("GCN_RAM_DUMP")) {\n'
         '        if (FILE* f = fopen(path, "wb")) { fwrite(g_mem, 1, RAM_SIZE, f); fclose(f); }\n'
         '    }\n'
