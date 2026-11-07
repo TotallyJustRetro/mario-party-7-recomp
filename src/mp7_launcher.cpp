@@ -758,4 +758,5 @@ extern int __argc; extern char** __argv;
 int WINAPI WinMain(HINSTANCE,HINSTANCE,LPSTR,int) {
     if (!redirect_runtime_log()) return 1;
     return main(__argc, __argv);
-}#endif
+}
+#endif
