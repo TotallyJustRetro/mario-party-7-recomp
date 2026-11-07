@@ -37,5 +37,5 @@ set_target_properties(CruiseNavigator PROPERTIES OUTPUT_NAME "CruiseNavigator")
 # The native launcher uses GetOpenFileNameA. Hide the console and use WinMain.
 if(WIN32)
   set_target_properties(CruiseNavigator PROPERTIES WIN32_EXECUTABLE TRUE)
-  target_link_libraries(CruiseNavigator PRIVATE comdlg32)
+  target_link_libraries(CruiseNavigator PRIVATE comdlg32 shell32 ole32)
 endif()
