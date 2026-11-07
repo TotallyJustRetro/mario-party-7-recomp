@@ -48,8 +48,7 @@ def patch(path: Path) -> None:
     )
     updated = replace_once(
         updated,
-        "#endif\n\n    if (!plat_readable(iso)) {",
-        "#endif\n\n"
+        "    if (!plat_readable(iso)) {",
         "    " + MARKER + "\n"
         "    // Explicit paths and headless runs bypass the interactive launcher.\n"
         "    if (!headless && !iso_from_command_line) {\n"
