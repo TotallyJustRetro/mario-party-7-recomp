@@ -1340,6 +1340,7 @@ fn_8009d540 = .text:0x8009D540; // type:function size:0x2A0
 PPCMfmsr = .text:0x8009D7E0; // type:function size:0x8
 PPCMtmsr = .text:0x8009D7E8; // type:function size:0x8
 PPCMfhid0 = .text:0x8009D7F0; // type:function size:0x8
+PPCMthid0 = .text:0x8009D7F8; // type:function size:0x8
 PPCMfl2cr = .text:0x8009D800; // type:function size:0x8
 PPCMtl2cr = .text:0x8009D808; // type:function size:0x8
 PPCMtdec = .text:0x8009D810; // type:function size:0x8
