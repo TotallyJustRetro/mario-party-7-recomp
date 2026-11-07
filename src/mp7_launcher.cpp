@@ -7,6 +7,7 @@
 #  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
 #  include <commdlg.h>
+#  include <shlobj.h>
 #  include <io.h>
 #  pragma comment(lib, "comdlg32.lib")
 #  pragma comment(lib, "ole32.lib")
@@ -26,6 +27,7 @@
 
 static char s_cfg[512];
 static char s_saved[512];
+static char s_log_folder[512];
 
 static void cfg_init() {
     if (s_cfg[0]) return;
@@ -37,19 +39,36 @@ static void cfg_init() {
     snprintf(s_cfg, sizeof s_cfg, "cruise_navigator.cfg");
 #endif
 }
+
 static void cfg_load() {
     cfg_init();
-    FILE* f = fopen(s_cfg, "r"); if (!f) return;
-    if (fgets(s_saved, sizeof s_saved, f)) {
-        size_t n = strlen(s_saved);
-        while (n && (s_saved[n-1]=='\n'||s_saved[n-1]=='\r')) s_saved[--n] = 0;
+    FILE* f = fopen(s_cfg, "r");
+    if (!f) return;
+
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        size_t n = strlen(line);
+        while (n && (line[n-1] == '\n' || line[n-1] == '\r')) line[--n] = 0;
+
+        if (strncmp(line, "disc=", 5) == 0) {
+            strncpy(s_saved, line + 5, sizeof(s_saved) - 1);
+        } else if (strncmp(line, "log_folder=", 11) == 0) {
+            strncpy(s_log_folder, line + 11, sizeof(s_log_folder) - 1);
+        } else if (!strchr(line, '=') && !s_saved[0]) {
+            // Backward compatibility with the original one-line config.
+            strncpy(s_saved, line, sizeof(s_saved) - 1);
+        }
     }
     fclose(f);
 }
-static void cfg_save(const char* path) {
+
+static void cfg_save_config() {
     cfg_init();
-    FILE* f = fopen(s_cfg, "w"); if (!f) return;
-    fprintf(f, "%s\n", path); fclose(f);
+    FILE* f = fopen(s_cfg, "w");
+    if (!f) return;
+    fprintf(f, "disc=%s\n", s_saved);
+    fprintf(f, "log_folder=%s\n", s_log_folder);
+    fclose(f);
 }
 
 // ── log ring ─────────────────────────────────────────────────────────────────
@@ -122,6 +141,113 @@ static bool open_dialog(char* out, int len) {
 static bool readable(const char* p) {
     FILE* f = fopen(p, "rb"); if (!f) return false; fclose(f); return true;
 }
+
+#ifdef _WIN32
+static bool choose_log_folder(char* out, int out_len) {
+    if (!out || out_len < 2) return false;
+    out[0] = 0;
+
+    HRESULT com_result = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    bool must_uninitialize = SUCCEEDED(com_result);
+
+    BROWSEINFOA bi = {};
+    char display_name[MAX_PATH] = {};
+    bi.hwndOwner = GetActiveWindow();
+    bi.pszDisplayName = display_name;
+    bi.lpszTitle = "Choose the folder for Cruise Navigator diagnostic logs";
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_EDITBOX;
+
+    LPITEMIDLIST item = SHBrowseForFolderA(&bi);
+    bool ok = false;
+    if (item) {
+        ok = SHGetPathFromIDListA(item, out) != FALSE;
+        CoTaskMemFree(item);
+    }
+
+    if (must_uninitialize) CoUninitialize();
+    if (!ok || !out[0]) return false;
+    out[out_len - 1] = 0;
+    return true;
+}
+#endif
+
+static bool apply_runtime_log_folder(const char* folder, char* error, size_t error_size) {
+#ifdef _WIN32
+    if (!folder || !folder[0]) {
+        snprintf(error, error_size, "No folder was selected.");
+        return false;
+    }
+
+    DWORD attrs = GetFileAttributesA(folder);
+    if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        snprintf(error, error_size, "The selected folder does not exist or cannot be accessed (Windows error %lu).",
+                 (unsigned long)GetLastError());
+        return false;
+    }
+
+    char log_path[MAX_PATH] = {};
+    char dump_path[MAX_PATH] = {};
+    int log_len = snprintf(log_path, sizeof(log_path), "%s\\runtime.log", folder);
+    int dump_len = snprintf(dump_path, sizeof(dump_path), "%s\\ramdump.bin", folder);
+    if (log_len < 0 || (size_t)log_len >= sizeof(log_path) ||
+        dump_len < 0 || (size_t)dump_len >= sizeof(dump_path)) {
+        snprintf(error, error_size, "The selected folder path is too long.");
+        return false;
+    }
+
+    HANDLE test = CreateFileA(log_path, FILE_APPEND_DATA,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (test == INVALID_HANDLE_VALUE) {
+        snprintf(error, error_size, "Cannot create runtime.log in that folder (Windows error %lu).",
+                 (unsigned long)GetLastError());
+        return false;
+    }
+
+    char header[1024];
+    int header_len = snprintf(header, sizeof(header),
+                              "\n=== Cruise Navigator diagnostics redirected ===\n"
+                              "[diag] selected log folder: %s\n"
+                              "[diag] RAM dump: %s\n",
+                              folder, dump_path);
+    if (header_len > 0) {
+        DWORD written = 0;
+        WriteFile(test, header, (DWORD)header_len, &written, NULL);
+    }
+    CloseHandle(test);
+
+    fflush(stderr);
+    if (!freopen(log_path, "a", stderr)) {
+        snprintf(error, error_size, "The log file was created, but stderr could not be redirected (CRT errno %d).",
+                 errno);
+        return false;
+    }
+
+    int fd = _fileno(stderr);
+    if (fd >= 0) {
+        _dup2(fd, 1);
+        HANDLE std_handle = (HANDLE)_get_osfhandle(fd);
+        if (std_handle != INVALID_HANDLE_VALUE) {
+            SetStdHandle(STD_ERROR_HANDLE, std_handle);
+            SetStdHandle(STD_OUTPUT_HANDLE, std_handle);
+        }
+    }
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+
+    SetEnvironmentVariableA("GCN_RAM_DUMP", dump_path);
+    SetEnvironmentVariableA("GCN_TRACE_DEPTH", "64");
+    SetEnvironmentVariableA("GCN_DIAGNOSTIC_DIR", folder);
+    fprintf(stderr, "[diag] runtime log destination changed to: %s\n", folder);
+    fflush(stderr);
+    return true;
+#else
+    (void)folder;
+    snprintf(error, error_size, "Choosing a diagnostic folder is currently supported on Windows.");
+    return false;
+#endif
+}
+
 
 // ── SDL2 renderer helpers ─────────────────────────────────────────────────────
 
