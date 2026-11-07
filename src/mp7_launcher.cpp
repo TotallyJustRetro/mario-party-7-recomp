@@ -28,6 +28,7 @@
 static char s_cfg[512];
 static char s_saved[512];
 static char s_log_folder[512];
+static char s_active_log_dir[512];
 
 static void cfg_init() {
     if (s_cfg[0]) return;
@@ -98,9 +99,13 @@ void cn_log_fatal(const char* msg) {
     cfg_init();
     char crash[512];
 #ifdef _WIN32
-    char exe[512]; GetModuleFileNameA(NULL, exe, sizeof exe);
-    char* p = strrchr(exe, '\\'); if (p) *p = 0;
-    snprintf(crash, sizeof crash, "%s\\crash_log.txt", exe);
+    if (s_active_log_dir[0]) {
+        snprintf(crash, sizeof crash, "%s\\crash_log.txt", s_active_log_dir);
+    } else {
+        char exe[512]; GetModuleFileNameA(NULL, exe, sizeof exe);
+        char* p = strrchr(exe, '\\'); if (p) *p = 0;
+        snprintf(crash, sizeof crash, "%s\\crash_log.txt", exe);
+    }
 #else
     snprintf(crash, sizeof crash, "crash_log.txt");
 #endif
@@ -235,6 +240,8 @@ static bool apply_runtime_log_folder(const char* folder, char* error, size_t err
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
 
+    strncpy(s_active_log_dir, crash_dir, sizeof(s_active_log_dir) - 1);
+    strncpy(s_active_log_dir, folder, sizeof(s_active_log_dir) - 1);
     SetEnvironmentVariableA("GCN_RAM_DUMP", dump_path);
     SetEnvironmentVariableA("GCN_TRACE_DEPTH", "64");
     SetEnvironmentVariableA("GCN_DIAGNOSTIC_DIR", folder);
