@@ -345,84 +345,86 @@ bool launcher_run(const char* default_path, char* out, int out_len) {
 }
 
 #ifdef _WIN32
-// Build as a GUI-subsystem executable. Persistent diagnostics live in the user's
-// LocalAppData directory so writing logs never depends on the install folder being writable.
+// Keep all diagnostics beside the game executable. No AppData or roaming paths.
 extern int main(int argc, char** argv);
 extern int __argc;
 extern char** __argv;
 
 static void redirect_runtime_log() {
     char exe_path[MAX_PATH] = {0};
-    DWORD exe_len = GetModuleFileNameA(NULL, exe_path, MAX_PATH);
-    char exe_dir[MAX_PATH] = {0};
-    if (exe_len > 0 && exe_len < MAX_PATH) {
-        strncpy(exe_dir, exe_path, sizeof exe_dir - 1);
-        char* slash = strrchr(exe_dir, '\\');
-        if (slash) *slash = 0;
+    char game_dir[MAX_PATH] = {0};
+    DWORD n = GetModuleFileNameA(NULL, exe_path, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) {
+        MessageBoxA(NULL, "Could not determine the game executable directory. Crash logs cannot be created.",
+                    "Cruise Navigator diagnostics", MB_OK | MB_ICONERROR);
+        return;
     }
 
-    char root[MAX_PATH] = {0};
-    DWORD root_len = GetEnvironmentVariableA("LOCALAPPDATA", root, MAX_PATH);
-    if (root_len == 0 || root_len >= MAX_PATH) {
-        strncpy(root, exe_dir[0] ? exe_dir : ".", sizeof root - 1);
-    }
+    strncpy(game_dir, exe_path, sizeof(game_dir) - 1);
+    char* slash = strrchr(game_dir, '\\');
+    if (!slash) slash = strrchr(game_dir, '/');
+    if (slash) *slash = '\0';
 
-    char app_dir[MAX_PATH] = {0};
-    char log_dir[MAX_PATH] = {0};
-    snprintf(app_dir, sizeof app_dir, "%s\\CruiseNavigator", root);
-    CreateDirectoryA(app_dir, NULL);
-    snprintf(log_dir, sizeof log_dir, "%s\\logs", app_dir);
-    if (!CreateDirectoryA(log_dir, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) {
-        // Fallback beside the executable if LocalAppData is unavailable.
-        snprintf(app_dir, sizeof app_dir, "%s\\CruiseNavigator", exe_dir[0] ? exe_dir : ".");
-        CreateDirectoryA(app_dir, NULL);
-        snprintf(log_dir, sizeof log_dir, "%s\\logs", app_dir);
-        CreateDirectoryA(log_dir, NULL);
-    }
-
+    char crash_dir[MAX_PATH] = {0};
     char log_path[MAX_PATH] = {0};
     char dump_path[MAX_PATH] = {0};
-    snprintf(log_path, sizeof log_path, "%s\\runtime.log", log_dir);
-    snprintf(dump_path, sizeof dump_path, "%s\\ramdump.bin", log_dir);
+    snprintf(crash_dir, sizeof(crash_dir), "%s\\crash", game_dir);
 
-    // The runtime's indirect-call failure handler already understands this variable
-    // and writes guest RAM (24 MiB) before aborting.
+    if (!CreateDirectoryA(crash_dir, NULL) &&
+        GetLastError() != ERROR_ALREADY_EXISTS) {
+        char message[MAX_PATH + 256] = {0};
+        snprintf(message, sizeof(message),
+                 "Could not create the crash folder beside the game:\n%s\n\nWindows error: %lu\n\n"
+                 "Move the game to a writable folder (not Program Files) and try again.",
+                 crash_dir, (unsigned long)GetLastError());
+        MessageBoxA(NULL, message, "Cruise Navigator diagnostics", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    DWORD attrs = GetFileAttributesA(crash_dir);
+    if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        MessageBoxA(NULL, "The path named 'crash' beside the game exists but is not a folder.",
+                    "Cruise Navigator diagnostics", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    snprintf(log_path, sizeof(log_path), "%s\\runtime.log", crash_dir);
+    snprintf(dump_path, sizeof(dump_path), "%s\\ramdump.bin", crash_dir);
+
     SetEnvironmentVariableA("GCN_RAM_DUMP", dump_path);
     SetEnvironmentVariableA("GCN_TRACE_DEPTH", "64");
-    SetEnvironmentVariableA("GCN_DIAGNOSTIC_DIR", log_dir);
+    SetEnvironmentVariableA("GCN_DIAGNOSTIC_DIR", crash_dir);
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
 
     FILE* log_file = freopen(log_path, "a", stderr);
-    if (log_file) {
-        const int fd = _fileno(stderr);
-        if (fd >= 0) {
-            _dup2(fd, 1); // stdout and stderr share the same append-only log
-            HANDLE log_handle = (HANDLE)_get_osfhandle(fd);
-            if (log_handle != INVALID_HANDLE_VALUE) {
-                SetStdHandle(STD_ERROR_HANDLE, log_handle);
-                SetStdHandle(STD_OUTPUT_HANDLE, log_handle);
-            }
-        }
-        setvbuf(stdout, NULL, _IONBF, 0);
-        setvbuf(stderr, NULL, _IONBF, 0);
-        fprintf(stderr, "\n========== Cruise Navigator startup ==========\n");
-        fprintf(stderr, "[diagnostics] log: %s\n", log_path);
-        fprintf(stderr, "[diagnostics] RAM dump: %s\n", dump_path);
-        fprintf(stderr, "[diagnostics] executable: %s\n", exe_path);
-        fprintf(stderr, "[diagnostics] build: %s %s\n", __DATE__, __TIME__);
-        fflush(stderr);
-    } else {
-        // Keep a minimal error record even if LocalAppData redirection fails.
-        char fallback[MAX_PATH] = {0};
-        snprintf(fallback, sizeof fallback, "%s\\CruiseNavigator-log-open-failed.txt",
-                 exe_dir[0] ? exe_dir : ".");
-        FILE* f = fopen(fallback, "a");
-        if (f) {
-            fprintf(f, "Could not open runtime log at %s (error %lu)\n",
-                    log_path, (unsigned long)GetLastError());
-            fclose(f);
+    if (!log_file) {
+        char message[MAX_PATH + 256] = {0};
+        snprintf(message, sizeof(message),
+                 "The crash folder exists, but runtime.log could not be opened:\n%s\n\n"
+                 "Windows error: %lu",
+                 log_path, (unsigned long)GetLastError());
+        MessageBoxA(NULL, message, "Cruise Navigator diagnostics", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    int fd = _fileno(stderr);
+    if (fd >= 0) {
+        _dup2(fd, 1);
+        HANDLE h = (HANDLE)_get_osfhandle(fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            SetStdHandle(STD_ERROR_HANDLE, h);
+            SetStdHandle(STD_OUTPUT_HANDLE, h);
         }
     }
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+    fprintf(stderr, "\n========== Cruise Navigator startup ==========\n");
+    fprintf(stderr, "[diagnostics] game directory: %s\n", game_dir);
+    fprintf(stderr, "[diagnostics] crash folder: %s\n", crash_dir);
+    fprintf(stderr, "[diagnostics] log: %s\n", log_path);
+    fprintf(stderr, "[diagnostics] RAM dump: %s\n", dump_path);
+    fprintf(stderr, "[diagnostics] build: %s %s\n", __DATE__, __TIME__);
+    fflush(stderr);
 }
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
