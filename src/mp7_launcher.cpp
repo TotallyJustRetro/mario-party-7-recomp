@@ -869,7 +869,7 @@ static bool redirect_runtime_log() {
     if (using_temp_fallback) {
         char fallback_line[512];
         snprintf(fallback_line, sizeof(fallback_line),
-                 "[diag] WARNING: beside-executable diagnostics failed at %s "
+                 "[diag] WARNING: preferred diagnostics location failed at %s "
                  "(Windows error %lu); using TEMP fallback.\n",
                  failure_stage ? failure_stage : "unknown stage",
                  (unsigned long)failure_code);
@@ -922,9 +922,10 @@ static bool redirect_runtime_log() {
     if (using_temp_fallback) {
         char message[1024];
         snprintf(message, sizeof(message),
-                 "Cruise Navigator could not write diagnostics beside its executable.\n"
-                 "A Windows error occurred during startup setup (code %lu).\n"
-                 "Diagnostics are being saved here:\n%s",
+                 "Cruise Navigator could not use its preferred diagnostics location.\n"
+                 "Stage: %s\nWindows error: %lu\n"
+                 "Diagnostics are being saved here instead:\n%s",
+                 failure_stage ? failure_stage : "unknown stage",
                  (unsigned long)failure_code, log_path);
         MessageBoxA(NULL, message, "Cruise Navigator diagnostics moved",
                     MB_OK | MB_ICONWARNING | MB_SYSTEMMODAL);
