@@ -8,6 +8,9 @@
 // build a live log ring and write crash_log.txt on fatal faults.
 
 #include "mp7_launcher.h"
+#ifdef _WIN32
+#  define SDL_MAIN_HANDLED
+#endif
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -208,6 +211,9 @@ bool launcher_run(const char* default_path, char* out, int out_len) {
     }
     const bool iso_ok_initial = iso[0] && readable(iso);
 
+#ifdef _WIN32
+    SDL_SetMainReady();
+#endif
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return false;
