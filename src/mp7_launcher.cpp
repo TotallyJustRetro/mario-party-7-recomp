@@ -19,6 +19,7 @@
 #  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
 #  include <commdlg.h>
+#  include <io.h>
 #  pragma comment(lib, "comdlg32.lib")
 #  pragma comment(lib, "ole32.lib")
 #endif
@@ -116,7 +117,7 @@ static bool open_dialog(char* out, int len) {
     OPENFILENAMEA ofn = {0};
     char buf[MAX_PATH] = {0};
     ofn.lStructSize  = sizeof ofn;
-    ofn.lpstrFilter  = "GameCube Image\0*.iso;*.ciso;*.rvz;*.gcm\0All\0*.*\0";
+    ofn.lpstrFilter  = "GameCube Disc Image\0*.iso;*.ciso;*.gcm\0All Files\0*.*\0";
     ofn.lpstrFile    = buf;
     ofn.nMaxFile     = MAX_PATH;
     ofn.lpstrTitle   = "Select Mario Party 7 Disc Image";
@@ -125,7 +126,7 @@ static bool open_dialog(char* out, int len) {
     strncpy(out, buf, len-1); out[len-1] = 0;
     return true;
 #else
-    fprintf(stdout, "Disc image path (.iso/.ciso/.rvz): ");
+    fprintf(stdout, "Disc image path (.iso/.ciso/.gcm): ");
     fflush(stdout);
     if (!fgets(out, len, stdin)) return false;
     size_t n = strlen(out);
@@ -193,15 +194,19 @@ static void draw_str(SDL_Surface* surf, int x, int y, const char* s, Uint32 col,
 
 // ── launcher ─────────────────────────────────────────────────────────────────
 
-bool launcher_run(char* out, int out_len) {
+bool launcher_run(const char* default_path, char* out, int out_len) {
+    if (!out || out_len < 2) return false;
+    out[0] = 0;
     cfg_load();
 
-    // Auto-launch if saved disc still exists
-    if (s_saved[0] && readable(s_saved)) {
-        strncpy(out, s_saved, out_len-1); out[out_len-1] = 0;
-        cn_log(0, "Auto-launch: %s", out);
-        return true;
+    // Prefer the saved selection; otherwise prefill the build's configured image.
+    char iso[512] = {0};
+    if (s_saved[0]) {
+        strncpy(iso, s_saved, sizeof iso - 1);
+    } else if (default_path && default_path[0]) {
+        strncpy(iso, default_path, sizeof iso - 1);
     }
+    const bool iso_ok_initial = iso[0] && readable(iso);
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
@@ -209,18 +214,24 @@ bool launcher_run(char* out, int out_len) {
     }
 
     const int W = 740, H = 500;
-    SDL_Window*  win  = SDL_CreateWindow("Cruise Navigator — Mario Party 7",
+    SDL_Window* win = SDL_CreateWindow("Cruise Navigator — Mario Party 7",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, W, H, SDL_WINDOW_SHOWN);
-    if (!win) { SDL_Quit(); return false; }
+    if (!win) {
+        fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError());
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return false;
+    }
     SDL_Surface* surf = SDL_GetWindowSurface(win);
+    if (!surf) {
+        fprintf(stderr, "SDL_GetWindowSurface: %s\n", SDL_GetError());
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return false;
+    }
 
-    char iso[512] = {0};
-    bool iso_ok   = false;
-    bool running  = true;
-    bool result   = false;
-
-    // Stash last-seen path so user can see it even if gone
-    if (s_saved[0]) strncpy(iso, s_saved, sizeof iso - 1);
+    bool iso_ok = iso_ok_initial;
+    bool running = true;
+    bool result = false;
 
     cn_log(0, "Cruise Navigator — select Mario Party 7 disc");
 
@@ -322,6 +333,44 @@ bool launcher_run(char* out, int out_len) {
     }
 
     SDL_DestroyWindow(win);
-    // Don't SDL_Quit — runtime will re-init with OpenGL
+    // Release the launcher's video subsystem before the game creates its GL window.
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
     return result;
 }
+
+#ifdef _WIN32
+// Build as a GUI-subsystem executable so users see the launcher, not a console window.
+// Runtime diagnostics are redirected beside the executable for troubleshooting.
+extern int main(int argc, char** argv);
+extern int __argc;
+extern char** __argv;
+
+static void redirect_runtime_log() {
+    char exe_path[MAX_PATH] = {0};
+    const DWORD length = GetModuleFileNameA(NULL, exe_path, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) return;
+
+    char* slash = strrchr(exe_path, '\\');
+    if (!slash) return;
+    *slash = 0;
+
+    char log_path[MAX_PATH] = {0};
+    snprintf(log_path, sizeof log_path, "%s\\CruiseNavigator.log", exe_path);
+    FILE* log_file = fopen(log_path, "a");
+    if (!log_file) return;
+
+    const int fd = _fileno(log_file);
+    if (fd >= 0) {
+        _dup2(fd, _fileno(stdout));
+        _dup2(fd, _fileno(stderr));
+    }
+    fclose(log_file);
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+}
+
+int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
+    redirect_runtime_log();
+    return main(__argc, __argv);
+}
+#endif
