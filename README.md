@@ -35,3 +35,12 @@ On Windows, the desktop executable opens the native Cruise Navigator disc picker
 CMake applies the small, idempotent startup hook to the checked-out `gcn-recomp/runtime/main.cpp` before building. If the upstream entry point changes, configuration stops with a clear error instead of producing an executable that silently skips the launcher. The HTML file supplied with the launcher design is only a visual prototype; it is not connected to the native launch backend.
 
 The Windows GUI executable redirects runtime diagnostics to `CruiseNavigator.log` beside the executable rather than opening a separate command window. A crash after selecting Launch can still indicate a separate recompilation issue; the launcher does not repair missing guest functions.
+
+## Crash diagnostics
+
+The Windows build writes persistent diagnostics under `%LOCALAPPDATA%\CruiseNavigator\logs\`:
+
+- `runtime.log`: standard output, fatal errors, CPU registers, host backtrace, and guest call stack
+- `ramdump.bin`: the guest RAM snapshot captured when an indirect call cannot be resolved
+
+The diagnostic build enables `GCN_TRACE_CALLS` and sets `GCN_RAM_DUMP` before the game runtime starts. The RAM dump is approximately 24 MiB. Share `runtime.log` first; the RAM dump is only needed for deeper memory inspection.
