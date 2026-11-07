@@ -142,7 +142,7 @@ def patch_runtime_check(cmake_path: Path) -> None:
         "  endif()"
     )
     updated = replace_once(source, anchor, replacement, "runtime_check target configuration")
-    cmake_path.write_text(updated, encoding="utf-8", newline="\\n")
+    cmake_path.write_text(updated, encoding="utf-8", newline="\n")
     print(f"Installed Cruise Navigator launcher compile check in {cmake_path}")
 
 
