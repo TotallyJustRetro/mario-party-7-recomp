@@ -48,16 +48,16 @@ def patch(path: Path) -> None:
     )
     updated = replace_once(
         updated,
-        "#endif\\n\\n    if (!plat_readable(iso)) {",
-        "#endif\\n\\n"
-        "    " + MARKER + "\\n"
-        "    // Explicit paths and headless runs bypass the interactive launcher.\\n"
-        "    if (!headless && !iso_from_command_line) {\\n"
-        "        char selected_iso[4096] = {};\\n"
-        "        if (!launcher_run(iso, selected_iso, (int)sizeof selected_iso)) return 0;\\n"
-        "        iso_default.assign(selected_iso);\\n"
-        "        iso = iso_default.c_str();\\n"
-        "    }\\n\\n"
+        "#endif\n\n    if (!plat_readable(iso)) {",
+        "#endif\n\n"
+        "    " + MARKER + "\n"
+        "    // Explicit paths and headless runs bypass the interactive launcher.\n"
+        "    if (!headless && !iso_from_command_line) {\n"
+        "        char selected_iso[4096] = {};\n"
+        "        if (!launcher_run(iso, selected_iso, (int)sizeof selected_iso)) return 0;\n"
+        "        iso_default.assign(selected_iso);\n"
+        "        iso = iso_default.c_str();\n"
+        "    }\n\n"
         "    if (!plat_readable(iso)) {",
         "launcher invocation",
     )
