@@ -30,17 +30,18 @@ cmake --build build
 
 ## Cruise Navigator startup
 
-On Windows, the desktop executable opens the native Cruise Navigator disc picker before starting the game. It remembers the selected ISO/CISO/GCM path in `cruise_navigator.cfg` beside the executable. Passing a disc path directly on the command line bypasses the picker.
+On Windows, the desktop executable opens the native Cruise Navigator disc picker before starting the game. It remembers the selected ISO/CISO/GCM path and diagnostic folder in `cruise_navigator.cfg` beside the executable. Passing a disc path directly on the command line bypasses the picker.
 
 CMake applies the small, idempotent startup hook to the checked-out `gcn-recomp/runtime/main.cpp` before building. If the upstream entry point changes, configuration stops with a clear error instead of producing an executable that silently skips the launcher. The HTML file supplied with the launcher design is only a visual prototype; it is not connected to the native launch backend.
 
-The Windows GUI executable redirects runtime diagnostics to `CruiseNavigator.log` beside the executable rather than opening a separate command window. A crash after selecting Launch can still indicate a separate recompilation issue; the launcher does not repair missing guest functions.
+The Windows GUI executable redirects runtime diagnostics to a file rather than opening a separate command window. A crash after selecting Launch can still indicate a separate recompilation issue; the launcher does not repair missing guest functions.
 
 ## Crash diagnostics
 
-The Windows build creates a `crash` folder directly beside `CruiseNavigator.exe`:
+The Cruise Navigator log panel includes a **Change Folder** control. Choose any writable folder and the launcher creates:
 
-- `crash/runtime.log`: startup output, fatal errors, registers, host backtrace, and guest call stack
-- `crash/ramdump.bin`: guest RAM snapshot captured when an indirect call cannot be resolved
+- `runtime.log`: startup output, runtime messages, fatal errors, registers, host backtrace, and guest call stack
+- `ramdump.bin`: guest RAM snapshot captured when an indirect call cannot be resolved (approximately 24 MiB)
+- `crash_log.txt`: launcher fatal messages, when applicable
 
-The build enables `GCN_TRACE_CALLS` and sets `GCN_RAM_DUMP` before the game runtime starts. The RAM dump is approximately 24 MiB. If Windows cannot create the folder (for example, when the game is installed under a protected directory), the program displays an error instead of silently switching to AppData.
+The selected folder is saved in `cruise_navigator.cfg` and reused on subsequent launches. The saved folder is activated before the game runtime starts, and the RAM-dump destination is updated to match. Before a custom folder is selected, the default destination is a `crash` folder beside `CruiseNavigator.exe`; if that location is unavailable, startup attempts a Windows temporary folder and displays the resulting location.
